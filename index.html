@@ -396,28 +396,37 @@
     let saveSound, crashSound, ambientSound;
 
     async function initAudio() {
-      if (audioInitialized) return;
-      await Tone.start();
-      
-      saveSound = new Tone.Synth({
-        oscillator: { type: 'sine' },
-        envelope: { attack: 0.1, decay: 0.3, sustain: 0.2, release: 0.5 }
-      }).toDestination();
-      
-      crashSound = new Tone.MembraneSynth({
-        pitchDecay: 0.1,
-        octaves: 3,
-        oscillator: { type: 'sine' },
-        envelope: { attack: 0.01, decay: 0.3, sustain: 0, release: 0.3 }
-      }).toDestination();
-      
-      ambientSound = new Tone.FilteredNoise({
-        noise: { type: 'white' },
-        filter: { type: 'lowpass', frequency: 200 }
-      }).toDestination();
-      ambientSound.volume.value = -20;
-      
-      audioInitialized = true;
+      if (typeof Tone === 'undefined') {
+        console.warn('Tone.js unavailable — audio disabled');
+        return;
+      }
+      try {
+        await Tone.start();
+        
+        saveSound = new Tone.Synth({
+          oscillator: { type: 'sine' },
+          envelope: { attack: 0.1, decay: 0.3, sustain: 0.2, release: 0.5 }
+        }).toDestination();
+        
+        crashSound = new Tone.MembraneSynth({
+          pitchDecay: 0.1,
+          octaves: 3,
+          oscillator: { type: 'sine' },
+          envelope: { attack: 0.01, decay: 0.3, sustain: 0, release: 0.3 }
+        }).toDestination();
+        
+        // Tone.FilteredNoise doesn't exist in v15 - use NoiseSynth instead
+        ambientSound = new Tone.NoiseSynth({
+          noise: { type: 'white' },
+          envelope: { attack: 0.5, decay: 0.5, sustain: 0 }
+        }).toDestination();
+        ambientSound.volume.value = -20;
+        
+        audioInitialized = true;
+      } catch(e) {
+        console.warn('Audio init failed:', e);
+        audioInitialized = false;
+      }
     }
 
     function playSaveSound() {
