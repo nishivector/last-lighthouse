@@ -31,12 +31,12 @@
       bottom: 60px;
       left: 50%;
       transform: translateX(-50%);
-      color: rgba(244, 164, 96, 0.7);
+      color: rgba(244, 164, 96, 0.9);
       font-size: 14px;
       text-align: center;
       z-index: 100;
       pointer-events: none;
-      text-shadow: 0 0 8px rgba(244, 164, 96, 0.5);
+      text-shadow: 0 0 8px rgba(244, 164, 96, 0.5), 0 2px 4px rgba(0, 0, 0, 0.8);
     }
     #startScreen {
       position: fixed;
@@ -227,7 +227,7 @@
     const beamMaterial = new THREE.MeshBasicMaterial({
       color: 0xf4a460,
       transparent: true,
-      opacity: 0.15,
+      opacity: 0.3,
       side: THREE.DoubleSide,
       depthWrite: false
     });
@@ -241,7 +241,7 @@
     const innerBeamMaterial = new THREE.MeshBasicMaterial({
       color: 0xffd090,
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.5,
       side: THREE.DoubleSide,
       depthWrite: false
     });
@@ -250,12 +250,24 @@
     innerBeam.position.z = -25;
     beamGroup.add(innerBeam);
 
+    // Beam hotspot indicator at tip
+    const hotspotGeometry = new THREE.SphereGeometry(0.8, 16, 16);
+    const hotspotMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.9
+    });
+    const hotspot = new THREE.Mesh(hotspotGeometry, hotspotMaterial);
+    hotspot.position.z = -50;
+    beamGroup.add(hotspot);
+
     scene.add(beamGroup);
 
     // Game Objects
     const ships = [];
     const rocks = [];
     const particles = [];
+    const floatingTexts = [];
 
     // Create Rocks
     function createRock(x, z, size) {
@@ -269,13 +281,15 @@
       rockGeometry.computeVertexNormals();
       
       const rockMaterial = new THREE.MeshStandardMaterial({
-        color: 0x1a1a1a,
+        color: 0x3a2020,
         roughness: 1,
-        metalness: 0
+        metalness: 0,
+        emissive: 0x4a1010,
+        emissiveIntensity: 0.3
       });
       const rock = new THREE.Mesh(rockGeometry, rockMaterial);
       rock.position.set(x, size * 0.3 - 1, z);
-      rock.userData = { type: 'rock', size };
+      rock.userData = { type: 'rock', size, baseEmissive: 0.3 };
       scene.add(rock);
       rocks.push(rock);
       return rock;
@@ -322,37 +336,37 @@
       sail.position.z = 0.5;
       shipGroup.add(sail);
 
-      // Spawn from edge
+      // Spawn from edge - always move toward lighthouse center
       const edge = Math.floor(Math.random() * 4);
-      let x, z, dirX, dirZ;
+      let x, z;
       const spawnDist = 45;
       
       switch(edge) {
         case 0: // Top
           x = (Math.random() - 0.5) * 60;
           z = -spawnDist;
-          dirX = (Math.random() - 0.5) * 0.3;
-          dirZ = 0.5 + Math.random() * 0.5;
           break;
         case 1: // Bottom
           x = (Math.random() - 0.5) * 60;
           z = spawnDist;
-          dirX = (Math.random() - 0.5) * 0.3;
-          dirZ = -0.5 - Math.random() * 0.5;
           break;
         case 2: // Left
           x = -spawnDist;
           z = (Math.random() - 0.5) * 60;
-          dirX = 0.5 + Math.random() * 0.5;
-          dirZ = (Math.random() - 0.5) * 0.3;
           break;
         case 3: // Right
           x = spawnDist;
           z = (Math.random() - 0.5) * 60;
-          dirX = -0.5 - Math.random() * 0.5;
-          dirZ = (Math.random() - 0.5) * 0.3;
           break;
       }
+      
+      // Calculate direction toward lighthouse center (0, 0, 0) with slight random offset
+      const targetX = (Math.random() - 0.5) * 10; // Small random offset for variety
+      const targetZ = (Math.random() - 0.5) * 10;
+      const dirToCenter = new THREE.Vector3(-x + targetX, 0, -z + targetZ).normalize();
+      const speed = (0.3 + Math.random() * 0.2) * state.difficulty;
+      const dirX = dirToCenter.x * speed;
+      const dirZ = dirToCenter.z * speed;
       
       shipGroup.position.set(x, 0, z);
       shipGroup.userData = {
@@ -389,6 +403,42 @@
         scene.add(particle);
         particles.push(particle);
       }
+    }
+
+    // Create Floating Score Popup
+    function createFloatingScore(x, z, text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      div.style.position = 'fixed';
+      div.style.color = '#f4a460';
+      div.style.fontSize = '24px';
+      div.style.fontWeight = 'bold';
+      div.style.textShadow = '0 0 10px rgba(244, 164, 96, 0.8)';
+      div.style.pointerEvents = 'none';
+      div.style.zIndex = '150';
+      div.style.transition = 'all 1s ease-out';
+      
+      // Project 3D position to 2D screen
+      const pos = new THREE.Vector3(x, 2, z);
+      pos.project(camera);
+      const screenX = (pos.x * 0.5 + 0.5) * window.innerWidth;
+      const screenY = (-pos.y * 0.5 + 0.5) * window.innerHeight;
+      
+      div.style.left = screenX + 'px';
+      div.style.top = screenY + 'px';
+      
+      document.body.appendChild(div);
+      
+      // Animate up and fade
+      requestAnimationFrame(() => {
+        div.style.top = (screenY - 60) + 'px';
+        div.style.opacity = '0';
+      });
+      
+      // Remove after animation
+      setTimeout(() => {
+        if (div.parentNode) div.parentNode.removeChild(div);
+      }, 1000);
     }
 
     // Audio
@@ -559,7 +609,7 @@
         
         // Increase difficulty over time
         state.difficulty = 1 + state.gameTime / 60000;
-        state.shipSpawnRate = Math.max(1500, 4000 - state.gameTime / 20);
+        state.shipSpawnRate = Math.max(2500, 4000 - state.gameTime / 40);
         
         // Smooth beam rotation
         state.beamAngle += (state.targetBeamAngle - state.beamAngle) * 0.1;
@@ -595,6 +645,7 @@
               state.score += 100 + Math.floor(state.difficulty * 50);
               state.shipsSaved++;
               createSaveParticles(ship.position.x, ship.position.z);
+              createFloatingScore(ship.position.x, ship.position.z, '+100');
               playSaveSound();
               scene.remove(ship);
               ships.splice(i, 1);
@@ -656,8 +707,16 @@
         }
         
         // Beam flicker
-        beamMaterial.opacity = 0.1 + Math.sin(now * 0.01) * 0.03;
-        innerBeamMaterial.opacity = 0.2 + Math.sin(now * 0.015) * 0.05;
+        beamMaterial.opacity = 0.25 + Math.sin(now * 0.01) * 0.05;
+        innerBeamMaterial.opacity = 0.45 + Math.sin(now * 0.015) * 0.05;
+        
+        // Rock glow pulsing
+        const rockGlow = 0.2 + Math.sin(now * 0.003) * 0.15;
+        rocks.forEach(rock => {
+          if (rock.material) {
+            rock.material.emissiveIntensity = rockGlow;
+          }
+        });
         
         // Update UI periodically
         if (Math.floor(now / 500) !== Math.floor((now - delta * 1000) / 500)) {
