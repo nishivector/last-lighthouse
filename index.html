@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Last Lighthouse</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      overflow: hidden; 
+      background: #0a0a12;
+      font-family: 'Courier New', monospace;
+    }
+    #gameCanvas { 
+      display: block; 
+      touch-action: none;
+    }
+    #ui {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      color: #f4a460;
+      font-size: 14px;
+      text-shadow: 0 0 10px rgba(244, 164, 96, 0.8);
+      z-index: 100;
+      pointer-events: none;
+    }
+    #score { font-size: 28px; font-weight: bold; }
+    #instructions {
+      position: fixed;
+      bottom: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(244, 164, 96, 0.7);
+      font-size: 14px;
+      text-align: center;
+      z-index: 100;
+      pointer-events: none;
+      text-shadow: 0 0 8px rgba(244, 164, 96, 0.5);
+    }
+    #startScreen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 10, 18, 0.95);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 200;
+      cursor: pointer;
+    }
+    #startScreen h1 {
+      color: #f4a460;
+      font-size: 48px;
+      text-shadow: 0 0 30px rgba(244, 164, 96, 0.8);
+      margin-bottom: 20px;
+      letter-spacing: 4px;
+    }
+    #startScreen p {
+      color: rgba(244, 164, 96, 0.6);
+      font-size: 16px;
+      margin-bottom: 40px;
+    }
+    #startScreen .hint {
+      color: rgba(255, 255, 255, 0.4);
+      font-size: 14px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 0.8; }
+    }
+    #gameOver {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 10, 18, 0.9);
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 200;
+      cursor: pointer;
+    }
+    #gameOver h2 {
+      color: #ff6b6b;
+      font-size: 36px;
+      text-shadow: 0 0 20px rgba(255, 107, 107, 0.8);
+      margin-bottom: 20px;
+    }
+    #gameOver .stats {
+      color: #f4a460;
+      font-size: 18px;
+      margin-bottom: 30px;
+    }
+    #gameOver .restart {
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 14px;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/tone@15.1.22/dist/Tone.js"></script>
+  <script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.0/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  
+  <div id="ui">
+    <div id="score">0</div>
+    <div id="shipsSaved">Ships Saved: 0</div>
+    <div id="timeSurvived">Time: 0:00</div>
+    <div id="shipsLost">Lost: 0/5</div>
+  </div>
+  
+  <div id="instructions">Drag to rotate beam • Hold on ships to save them</div>
+  
+  <div id="startScreen">
+    <h1>LAST LIGHTHOUSE</h1>
+    <p>The fog is thick. The beam is fading. Ships need you.</p>
+    <div class="hint">Click anywhere to begin your watch</div>
+  </div>
+  
+  <div id="gameOver">
+    <h2>LIGHTHOUSE FALLEN</h2>
+    <div class="stats">
+      <div id="finalScore">Score: 0</div>
+      <div id="finalShips">Ships Saved: 0</div>
+      <div id="finalTime">Time: 0:00</div>
+    </div>
+    <div class="restart">Click to try again</div>
+  </div>
+  
+  <a href="https://github.com/nishivector/last-lighthouse" target="_blank" style="position:fixed;bottom:16px;right:16px;color:rgba(255,255,255,0.4);font-size:12px;text-decoration:none;font-family:monospace;z-index:1000;">GitHub ↗</a>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    // Game State
+    const state = {
+      score: 0,
+      shipsSaved: 0,
+      shipsLost: 0,
+      maxLost: 5,
+      gameTime: 0,
+      isPlaying: false,
+      beamAngle: 0,
+      targetBeamAngle: 0,
+      isDragging: false,
+      lastMouseX: 0,
+      beamPower: 1.0,
+      shipSpawnRate: 4000,
+      lastShipSpawn: 0,
+      difficulty: 1
+    };
+
+    // Three.js Setup
+    const canvas = document.getElementById('gameCanvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x0a0a12);
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x0a0a12, 0.025);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 25, 35);
+    camera.lookAt(0, 0, 0);
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0x1a1a2e, 0.3);
+    scene.add(ambientLight);
+
+    // Lighthouse Tower
+    const towerGeometry = new THREE.CylinderGeometry(1.5, 2.5, 12, 8);
+    const towerMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x2a2a3a,
+      roughness: 0.9,
+      metalness: 0.1
+    });
+    const tower = new THREE.Mesh(towerGeometry, towerMaterial);
+    tower.position.set(0, 6, 0);
+    scene.add(tower);
+
+    // Lighthouse Lantern Room
+    const lanternGeometry = new THREE.CylinderGeometry(1.2, 1.5, 2, 8);
+    const lanternMaterial = new THREE.MeshStandardMaterial({
+      color: 0x3a3a4a,
+      roughness: 0.5,
+      metalness: 0.3,
+      emissive: 0xf4a460,
+      emissiveIntensity: 0.3
+    });
+    const lantern = new THREE.Mesh(lanternGeometry, lanternMaterial);
+    lantern.position.set(0, 13, 0);
+    scene.add(lantern);
+
+    // Lighthouse Light Source
+    const lighthouseLight = new THREE.PointLight(0xf4a460, 3, 60);
+    lighthouseLight.position.set(0, 14, 0);
+    scene.add(lighthouseLight);
+
+    // Sea
+    const seaGeometry = new THREE.PlaneGeometry(200, 200, 50, 50);
+    const seaMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0a1520,
+      roughness: 0.8,
+      metalness: 0.2
+    });
+    const sea = new THREE.Mesh(seaGeometry, seaMaterial);
+    sea.rotation.x = -Math.PI / 2;
+    sea.position.y = -1;
+    scene.add(sea);
+
+    // Lighthouse Beam (Cone + Volumetric effect)
+    const beamGroup = new THREE.Group();
+    beamGroup.position.set(0, 14, 0);
+
+    // Beam cone
+    const beamGeometry = new THREE.ConeGeometry(25, 50, 32, 1, true);
+    const beamMaterial = new THREE.MeshBasicMaterial({
+      color: 0xf4a460,
+      transparent: true,
+      opacity: 0.15,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    const beam = new THREE.Mesh(beamGeometry, beamMaterial);
+    beam.rotation.x = Math.PI / 2;
+    beam.position.z = -25;
+    beamGroup.add(beam);
+
+    // Inner beam (brighter)
+    const innerBeamGeometry = new THREE.ConeGeometry(15, 50, 32, 1, true);
+    const innerBeamMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffd090,
+      transparent: true,
+      opacity: 0.25,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    const innerBeam = new THREE.Mesh(innerBeamGeometry, innerBeamMaterial);
+    innerBeam.rotation.x = Math.PI / 2;
+    innerBeam.position.z = -25;
+    beamGroup.add(innerBeam);
+
+    scene.add(beamGroup);
+
+    // Game Objects
+    const ships = [];
+    const rocks = [];
+    const particles = [];
+
+    // Create Rocks
+    function createRock(x, z, size) {
+      const rockGeometry = new THREE.DodecahedronGeometry(size, 0);
+      const positions = rockGeometry.attributes.position.array;
+      for (let i = 0; i < positions.length; i += 3) {
+        positions[i] += (Math.random() - 0.5) * size * 0.4;
+        positions[i + 1] += (Math.random() - 0.5) * size * 0.4;
+        positions[i + 2] += (Math.random() - 0.5) * size * 0.4;
+      }
+      rockGeometry.computeVertexNormals();
+      
+      const rockMaterial = new THREE.MeshStandardMaterial({
+        color: 0x1a1a1a,
+        roughness: 1,
+        metalness: 0
+      });
+      const rock = new THREE.Mesh(rockGeometry, rockMaterial);
+      rock.position.set(x, size * 0.3 - 1, z);
+      rock.userData = { type: 'rock', size };
+      scene.add(rock);
+      rocks.push(rock);
+      return rock;
+    }
+
+    // Place rocks around the sea
+    for (let i = 0; i < 15; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 15 + Math.random() * 30;
+      const size = 1 + Math.random() * 2;
+      createRock(Math.cos(angle) * dist, Math.sin(angle) * dist, size);
+    }
+
+    // Create Ship
+    function createShip() {
+      const shipGroup = new THREE.Group();
+      
+      // Hull
+      const hullGeometry = new THREE.BoxGeometry(2, 0.8, 4);
+      const hullMaterial = new THREE.MeshStandardMaterial({
+        color: 0x1a1a1a,
+        roughness: 0.9
+      });
+      const hull = new THREE.Mesh(hullGeometry, hullMaterial);
+      shipGroup.add(hull);
+      
+      // Mast
+      const mastGeometry = new THREE.CylinderGeometry(0.1, 0.1, 3);
+      const mastMaterial = new THREE.MeshStandardMaterial({ color: 0x2a2a2a });
+      const mast = new THREE.Mesh(mastGeometry, mastMaterial);
+      mast.position.y = 1.5;
+      shipGroup.add(mast);
+      
+      // Sail (barely visible silhouette)
+      const sailGeometry = new THREE.PlaneGeometry(1.5, 2.5);
+      const sailMaterial = new THREE.MeshBasicMaterial({
+        color: 0x0a0a0a,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.6
+      });
+      const sail = new THREE.Mesh(sailGeometry, sailMaterial);
+      sail.position.y = 2;
+      sail.position.z = 0.5;
+      shipGroup.add(sail);
+
+      // Spawn from edge
+      const edge = Math.floor(Math.random() * 4);
+      let x, z, dirX, dirZ;
+      const spawnDist = 45;
+      
+      switch(edge) {
+        case 0: // Top
+          x = (Math.random() - 0.5) * 60;
+          z = -spawnDist;
+          dirX = (Math.random() - 0.5) * 0.3;
+          dirZ = 0.5 + Math.random() * 0.5;
+          break;
+        case 1: // Bottom
+          x = (Math.random() - 0.5) * 60;
+          z = spawnDist;
+          dirX = (Math.random() - 0.5) * 0.3;
+          dirZ = -0.5 - Math.random() * 0.5;
+          break;
+        case 2: // Left
+          x = -spawnDist;
+          z = (Math.random() - 0.5) * 60;
+          dirX = 0.5 + Math.random() * 0.5;
+          dirZ = (Math.random() - 0.5) * 0.3;
+          break;
+        case 3: // Right
+          x = spawnDist;
+          z = (Math.random() - 0.5) * 60;
+          dirX = -0.5 - Math.random() * 0.5;
+          dirZ = (Math.random() - 0.5) * 0.3;
+          break;
+      }
+      
+      shipGroup.position.set(x, 0, z);
+      shipGroup.userData = {
+        type: 'ship',
+        velocity: new THREE.Vector3(dirX * state.difficulty, 0, dirZ * state.difficulty),
+        rescueProgress: 0,
+        isRescued: false,
+        glowIntensity: 0
+      };
+      
+      scene.add(shipGroup);
+      ships.push(shipGroup);
+    }
+
+    // Create Save Effect Particles
+    function createSaveParticles(x, z) {
+      for (let i = 0; i < 20; i++) {
+        const particleGeometry = new THREE.SphereGeometry(0.15, 8, 8);
+        const particleMaterial = new THREE.MeshBasicMaterial({
+          color: 0xf4a460,
+          transparent: true,
+          opacity: 1
+        });
+        const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+        particle.position.set(x, 1, z);
+        particle.userData = {
+          velocity: new THREE.Vector3(
+            (Math.random() - 0.5) * 0.5,
+            Math.random() * 0.5 + 0.2,
+            (Math.random() - 0.5) * 0.5
+          ),
+          life: 1
+        };
+        scene.add(particle);
+        particles.push(particle);
+      }
+    }
+
+    // Audio
+    let audioInitialized = false;
+    let saveSound, crashSound, ambientSound;
+
+    async function initAudio() {
+      if (audioInitialized) return;
+      await Tone.start();
+      
+      saveSound = new Tone.Synth({
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.1, decay: 0.3, sustain: 0.2, release: 0.5 }
+      }).toDestination();
+      
+      crashSound = new Tone.MembraneSynth({
+        pitchDecay: 0.1,
+        octaves: 3,
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.01, decay: 0.3, sustain: 0, release: 0.3 }
+      }).toDestination();
+      
+      ambientSound = new Tone.FilteredNoise({
+        noise: { type: 'white' },
+        filter: { type: 'lowpass', frequency: 200 }
+      }).toDestination();
+      ambientSound.volume.value = -20;
+      
+      audioInitialized = true;
+    }
+
+    function playSaveSound() {
+      if (!audioInitialized) return;
+      saveSound.triggerAttackRelease('C5', '8n');
+      setTimeout(() => saveSound.triggerAttackRelease('E5', '8n'), 100);
+      setTimeout(() => saveSound.triggerAttackRelease('G5', '16n'), 200);
+    }
+
+    function playCrashSound() {
+      if (!audioInitialized) return;
+      crashSound.triggerAttackRelease('A1', '4n');
+    }
+
+    // Pointer Events
+    function onPointerDown(e) {
+      if (!state.isPlaying) return;
+      state.isDragging = true;
+      state.lastMouseX = e.clientX;
+    }
+
+    function onPointerMove(e) {
+      if (!state.isPlaying || !state.isDragging) return;
+      const deltaX = e.clientX - state.lastMouseX;
+      state.targetBeamAngle += deltaX * 0.01;
+      state.lastMouseX = e.clientX;
+    }
+
+    function onPointerUp() {
+      state.isDragging = false;
+    }
+
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
+
+    // Start Game
+    const startScreen = document.getElementById('startScreen');
+    const gameOverScreen = document.getElementById('gameOver');
+    const ui = document.getElementById('ui');
+
+    startScreen.addEventListener('click', async () => {
+      await initAudio();
+      startGame();
+    });
+
+    gameOverScreen.addEventListener('click', () => {
+      gameOverScreen.style.display = 'none';
+      resetGame();
+      startGame();
+    });
+
+    function startGame() {
+      state.isPlaying = true;
+      startScreen.style.display = 'none';
+      state.lastShipSpawn = performance.now();
+    }
+
+    function resetGame() {
+      state.score = 0;
+      state.shipsSaved = 0;
+      state.shipsLost = 0;
+      state.gameTime = 0;
+      state.beamAngle = 0;
+      state.targetBeamAngle = 0;
+      state.difficulty = 1;
+      state.shipSpawnRate = 4000;
+      
+      // Remove all ships
+      ships.forEach(ship => scene.remove(ship));
+      ships.length = 0;
+      
+      // Remove all particles
+      particles.forEach(p => scene.remove(p));
+      particles.length = 0;
+      
+      updateUI();
+    }
+
+    function endGame() {
+      state.isPlaying = false;
+      gameOverScreen.style.display = 'flex';
+      document.getElementById('finalScore').textContent = `Score: ${state.score}`;
+      document.getElementById('finalShips').textContent = `Ships Saved: ${state.shipsSaved}`;
+      document.getElementById('finalTime').textContent = `Time: ${formatTime(state.gameTime)}`;
+    }
+
+    function formatTime(ms) {
+      const seconds = Math.floor(ms / 1000);
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    function updateUI() {
+      document.getElementById('score').textContent = state.score;
+      document.getElementById('shipsSaved').textContent = `Ships Saved: ${state.shipsSaved}`;
+      document.getElementById('timeSurvived').textContent = `Time: ${formatTime(state.gameTime)}`;
+      document.getElementById('shipsLost').textContent = `Lost: ${state.shipsLost}/${state.maxLost}`;
+    }
+
+    // Check if ship is in beam
+    function isShipInBeam(ship) {
+      const beamDir = new THREE.Vector3(0, 0, -1);
+      beamDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), state.beamAngle);
+      
+      const shipDir = new THREE.Vector3();
+      shipDir.subVectors(ship.position, new THREE.Vector3(0, 14, 0)).normalize();
+      
+      const angle = beamDir.angleTo(shipDir);
+      const dist = ship.position.distanceTo(new THREE.Vector3(0, 14, 0));
+      
+      // Beam cone angle and range
+      return angle < 0.4 && dist < 50 && dist > 5;
+    }
+
+    // Game Loop
+    let lastTime = performance.now();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      
+      const now = performance.now();
+      const delta = (now - lastTime) / 1000;
+      lastTime = now;
+      
+      if (state.isPlaying) {
+        state.gameTime += delta * 1000;
+        
+        // Increase difficulty over time
+        state.difficulty = 1 + state.gameTime / 60000;
+        state.shipSpawnRate = Math.max(1500, 4000 - state.gameTime / 20);
+        
+        // Smooth beam rotation
+        state.beamAngle += (state.targetBeamAngle - state.beamAngle) * 0.1;
+        beamGroup.rotation.y = state.beamAngle;
+        
+        // Spawn ships
+        if (now - state.lastShipSpawn > state.shipSpawnRate) {
+          createShip();
+          state.lastShipSpawn = now;
+        }
+        
+        // Update ships
+        for (let i = ships.length - 1; i >= 0; i--) {
+          const ship = ships[i];
+          ship.position.add(ship.userData.velocity);
+          ship.rotation.y = Math.atan2(ship.userData.velocity.x, ship.userData.velocity.z);
+          
+          // Check if in beam
+          if (isShipInBeam(ship)) {
+            ship.userData.rescueProgress += delta;
+            ship.userData.glowIntensity = Math.min(1, ship.userData.glowIntensity + delta * 2);
+            
+            // Glow effect
+            ship.children.forEach(child => {
+              if (child.material) {
+                child.material.emissive = new THREE.Color(0xf4a460);
+                child.material.emissiveIntensity = ship.userData.glowIntensity * 0.5;
+              }
+            });
+            
+            // Ship rescued
+            if (ship.userData.rescueProgress >= 1.5) {
+              state.score += 100 + Math.floor(state.difficulty * 50);
+              state.shipsSaved++;
+              createSaveParticles(ship.position.x, ship.position.z);
+              playSaveSound();
+              scene.remove(ship);
+              ships.splice(i, 1);
+              updateUI();
+            }
+          } else {
+            ship.userData.glowIntensity = Math.max(0, ship.userData.glowIntensity - delta * 2);
+            ship.children.forEach(child => {
+              if (child.material) {
+                child.material.emissiveIntensity = ship.userData.glowIntensity * 0.5;
+              }
+            });
+          }
+          
+          // Check rock collision
+          for (const rock of rocks) {
+            const dist = ship.position.distanceTo(rock.position);
+            if (dist < rock.userData.size + 2) {
+              state.shipsLost++;
+              state.score = Math.max(0, state.score - 50);
+              playCrashSound();
+              scene.remove(ship);
+              ships.splice(i, 1);
+              updateUI();
+              
+              if (state.shipsLost >= state.maxLost) {
+                endGame();
+              }
+              break;
+            }
+          }
+          
+          // Ship escaped (went too far)
+          if (ship.position.length() > 60) {
+            state.shipsLost++;
+            state.score = Math.max(0, state.score - 25);
+            scene.remove(ship);
+            ships.splice(i, 1);
+            updateUI();
+            
+            if (state.shipsLost >= state.maxLost) {
+              endGame();
+            }
+          }
+        }
+        
+        // Update particles
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.position.add(p.userData.velocity);
+          p.userData.velocity.y -= 0.02; // Gravity
+          p.userData.life -= delta * 2;
+          p.material.opacity = p.userData.life;
+          
+          if (p.userData.life <= 0) {
+            scene.remove(p);
+            particles.splice(i, 1);
+          }
+        }
+        
+        // Beam flicker
+        beamMaterial.opacity = 0.1 + Math.sin(now * 0.01) * 0.03;
+        innerBeamMaterial.opacity = 0.2 + Math.sin(now * 0.015) * 0.05;
+        
+        // Update UI periodically
+        if (Math.floor(now / 500) !== Math.floor((now - delta * 1000) / 500)) {
+          updateUI();
+        }
+      }
+      
+      renderer.render(scene, camera);
+    }
+
+    // Handle resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    animate();
+  </script>
+</body>
+</html>
